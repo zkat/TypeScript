@@ -59,6 +59,8 @@ namespace ts {
          * Cache of all the file names
          */
         allFileNames?: readonly string[];
+
+        ignoreSignatures: boolean;
     }
 
     export namespace BuilderState {
@@ -236,7 +238,8 @@ namespace ts {
                 fileInfos,
                 referencedMap,
                 exportedModulesMap,
-                hasCalledUpdateShapeSignature
+                hasCalledUpdateShapeSignature,
+                ignoreSignatures: !useOldState,
             };
         }
 
@@ -258,6 +261,7 @@ namespace ts {
                 referencedMap: state.referencedMap && new Map(state.referencedMap),
                 exportedModulesMap: state.exportedModulesMap && new Map(state.exportedModulesMap),
                 hasCalledUpdateShapeSignature: new Set(state.hasCalledUpdateShapeSignature),
+                ignoreSignatures: state.ignoreSignatures,
             };
         }
 
@@ -275,7 +279,7 @@ namespace ts {
                 return emptyArray;
             }
 
-            if (!updateShapeSignature(state, programOfThisState, sourceFile, signatureCache, cancellationToken, computeHash, exportedModulesMapCache)) {
+            if (state.ignoreSignatures || !updateShapeSignature(state, programOfThisState, sourceFile, signatureCache, cancellationToken, computeHash, exportedModulesMapCache)) {
                 return [sourceFile];
             }
 
