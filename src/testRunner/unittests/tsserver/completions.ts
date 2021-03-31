@@ -36,19 +36,24 @@ namespace ts.projectSystem {
                 kindModifiers: ScriptElementKindModifier.exportedModifier,
                 name: "foo",
                 replacementSpan: undefined,
+                isPackageJsonImport: undefined,
                 sortText: Completions.SortText.AutoImportSuggestions,
                 source: "/a",
+                sourceDisplay: undefined,
+                isSnippet: undefined,
+                data: { exportName: "foo", fileName: "/a.ts", ambientModuleName: undefined, isPackageJsonImport: undefined, moduleSpecifier: undefined }
             };
             assert.deepEqual<protocol.CompletionInfo | undefined>(response, {
                 isGlobalCompletion: true,
                 isMemberCompletion: false,
                 isNewIdentifierLocation: false,
+                optionalReplacementSpan: { start: { line: 1, offset: 1 }, end: { line: 1, offset: 4 } },
                 entries: [entry],
             });
 
             const detailsRequestArgs: protocol.CompletionDetailsRequestArgs = {
                 ...requestLocation,
-                entryNames: [{ name: "foo", source: "/a" }],
+                entryNames: [{ name: "foo", source: "/a", data: { exportName: "foo", fileName: "/a.ts" } }],
             };
 
             const detailsResponse = executeSessionRequest<protocol.CompletionDetailsRequest, protocol.CompletionDetailsResponse>(session, protocol.CommandTypes.CompletionDetails, detailsRequestArgs);
@@ -66,7 +71,7 @@ namespace ts.projectSystem {
                 kindModifiers: ScriptElementKindModifier.exportedModifier,
                 name: "foo",
                 source: [{ text: "./a", kind: "text" }],
-                tags: undefined,
+                sourceDisplay: [{ text: "./a", kind: "text" }],
             };
             assert.deepEqual<readonly protocol.CompletionEntryDetails[] | undefined>(detailsResponse, [
                 {
@@ -88,6 +93,7 @@ namespace ts.projectSystem {
                             commands: undefined,
                         },
                     ],
+                    tags: [],
                     ...detailsCommon,
                 },
             ]);
@@ -114,6 +120,7 @@ namespace ts.projectSystem {
                             commands: undefined,
                         }
                     ],
+                    tags: [],
                     ...detailsCommon,
                 }
             ]);

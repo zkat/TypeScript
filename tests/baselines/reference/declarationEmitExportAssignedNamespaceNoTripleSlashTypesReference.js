@@ -53,7 +53,7 @@ var get_comp_1 = require("./get-comp");
 // this shouldn't need any triple-slash references - it should have a direct import to `react` and that's it
 // This issue (#35343) _only_ reproduces in the test harness when the file in question is in a subfolder
 exports.obj = {
-    comp: get_comp_1.getComp()
+    comp: (0, get_comp_1.getComp)()
 };
 //// [some-other-file.js]
 "use strict";
@@ -65,8 +65,8 @@ var __createBinding = (this && this.__createBinding) || (Object.create ? (functi
     o[k2] = m[k];
 }));
 var __exportStar = (this && this.__exportStar) || function(m, exports) {
-    for (var p in m) if (p !== "default" && !exports.hasOwnProperty(p)) __createBinding(exports, m, p);
-}
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
 exports.__esModule = true;
 __exportStar(require("@emotion/core"), exports);
 

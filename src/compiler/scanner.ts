@@ -21,23 +21,29 @@ namespace ts {
         hasUnicodeEscape(): boolean;
         hasExtendedUnicodeEscape(): boolean;
         hasPrecedingLineBreak(): boolean;
+        /* @internal */
+        hasPrecedingJSDocComment(): boolean;
         isIdentifier(): boolean;
         isReservedWord(): boolean;
         isUnterminated(): boolean;
+        /* @internal */
+        getNumericLiteralFlags(): TokenFlags;
         /* @internal */
         getCommentDirectives(): CommentDirective[] | undefined;
         /* @internal */
         getTokenFlags(): TokenFlags;
         reScanGreaterToken(): SyntaxKind;
         reScanSlashToken(): SyntaxKind;
+        reScanAsteriskEqualsToken(): SyntaxKind;
         reScanTemplateToken(isTaggedTemplate: boolean): SyntaxKind;
         reScanTemplateHeadOrNoSubstitutionTemplate(): SyntaxKind;
         scanJsxIdentifier(): SyntaxKind;
         scanJsxAttributeValue(): SyntaxKind;
         reScanJsxAttributeValue(): SyntaxKind;
-        reScanJsxToken(): JsxTokenSyntaxKind;
+        reScanJsxToken(allowMultilineJsxText?: boolean): JsxTokenSyntaxKind;
         reScanLessThanToken(): SyntaxKind;
         reScanQuestionToken(): SyntaxKind;
+        reScanInvalidIdentifier(): SyntaxKind;
         scanJsxToken(): JsxTokenSyntaxKind;
         scanJsDocToken(): JSDocSyntaxKind;
         scan(): SyntaxKind;
@@ -106,6 +112,7 @@ namespace ts {
         infer: SyntaxKind.InferKeyword,
         instanceof: SyntaxKind.InstanceOfKeyword,
         interface: SyntaxKind.InterfaceKeyword,
+        intrinsic: SyntaxKind.IntrinsicKeyword,
         is: SyntaxKind.IsKeyword,
         keyof: SyntaxKind.KeyOfKeyword,
         let: SyntaxKind.LetKeyword,
@@ -120,6 +127,7 @@ namespace ts {
         private: SyntaxKind.PrivateKeyword,
         protected: SyntaxKind.ProtectedKeyword,
         public: SyntaxKind.PublicKeyword,
+        override: SyntaxKind.OverrideKeyword,
         readonly: SyntaxKind.ReadonlyKeyword,
         require: SyntaxKind.RequireKeyword,
         global: SyntaxKind.GlobalKeyword,
@@ -149,9 +157,9 @@ namespace ts {
         of: SyntaxKind.OfKeyword,
     };
 
-    const textToKeyword = createMapFromTemplate(textToKeywordObj);
+    const textToKeyword = new Map(getEntries(textToKeywordObj));
 
-    const textToToken = createMapFromTemplate<SyntaxKind>({
+    const textToToken = new Map(getEntries({
         ...textToKeywordObj,
         "{": SyntaxKind.OpenBraceToken,
         "}": SyntaxKind.CloseBraceToken,
@@ -208,9 +216,12 @@ namespace ts {
         "&=": SyntaxKind.AmpersandEqualsToken,
         "|=": SyntaxKind.BarEqualsToken,
         "^=": SyntaxKind.CaretEqualsToken,
+        "||=": SyntaxKind.BarBarEqualsToken,
+        "&&=": SyntaxKind.AmpersandAmpersandEqualsToken,
+        "??=": SyntaxKind.QuestionQuestionEqualsToken,
         "@": SyntaxKind.AtToken,
         "`": SyntaxKind.BacktickToken
-    });
+    }));
 
     /*
         As per ECMAScript Language Specification 3th Edition, Section 7.6: Identifiers
@@ -323,7 +334,7 @@ namespace ts {
                 lookupInUnicodeMap(code, unicodeES3IdentifierPart);
     }
 
-    function makeReverseMap(source: Map<number>): string[] {
+    function makeReverseMap(source: ESMap<string, number>): string[] {
         const result: string[] = [];
         source.forEach((value, name) => {
             result[value] = name;
@@ -939,12 +950,15 @@ namespace ts {
             hasUnicodeEscape: () => (tokenFlags & TokenFlags.UnicodeEscape) !== 0,
             hasExtendedUnicodeEscape: () => (tokenFlags & TokenFlags.ExtendedUnicodeEscape) !== 0,
             hasPrecedingLineBreak: () => (tokenFlags & TokenFlags.PrecedingLineBreak) !== 0,
+            hasPrecedingJSDocComment: () => (tokenFlags & TokenFlags.PrecedingJSDocComment) !== 0,
             isIdentifier: () => token === SyntaxKind.Identifier || token > SyntaxKind.LastReservedWord,
             isReservedWord: () => token >= SyntaxKind.FirstReservedWord && token <= SyntaxKind.LastReservedWord,
             isUnterminated: () => (tokenFlags & TokenFlags.Unterminated) !== 0,
             getCommentDirectives: () => commentDirectives,
+            getNumericLiteralFlags: () => tokenFlags & TokenFlags.NumericLiteralFlags,
             getTokenFlags: () => tokenFlags,
             reScanGreaterToken,
+            reScanAsteriskEqualsToken,
             reScanSlashToken,
             reScanTemplateToken,
             reScanTemplateHeadOrNoSubstitutionTemplate,
@@ -954,6 +968,7 @@ namespace ts {
             reScanJsxToken,
             reScanLessThanToken,
             reScanQuestionToken,
+            reScanInvalidIdentifier,
             scanJsxToken,
             scanJsDocToken,
             scan,
@@ -1497,9 +1512,9 @@ namespace ts {
         }
 
         function getIdentifierToken(): SyntaxKind.Identifier | KeywordSyntaxKind {
-            // Reserved words are between 2 and 11 characters long and start with a lowercase letter
+            // Reserved words are between 2 and 12 characters long and start with a lowercase letter
             const len = tokenValue.length;
-            if (len >= 2 && len <= 11) {
+            if (len >= 2 && len <= 12) {
                 const ch = tokenValue.charCodeAt(0);
                 if (ch >= CharacterCodes.a && ch <= CharacterCodes.z) {
                     const keyword = textToKeyword.get(tokenValue);
@@ -1667,6 +1682,9 @@ namespace ts {
                         return token = SyntaxKind.PercentToken;
                     case CharacterCodes.ampersand:
                         if (text.charCodeAt(pos + 1) === CharacterCodes.ampersand) {
+                            if (text.charCodeAt(pos + 2) === CharacterCodes.equals) {
+                                return pos += 3, token = SyntaxKind.AmpersandAmpersandEqualsToken;
+                            }
                             return pos += 2, token = SyntaxKind.AmpersandAmpersandToken;
                         }
                         if (text.charCodeAt(pos + 1) === CharacterCodes.equals) {
@@ -1928,15 +1946,16 @@ namespace ts {
                         pos++;
                         return token = SyntaxKind.GreaterThanToken;
                     case CharacterCodes.question:
+                        if (text.charCodeAt(pos + 1) === CharacterCodes.dot && !isDigit(text.charCodeAt(pos + 2))) {
+                            return pos += 2, token = SyntaxKind.QuestionDotToken;
+                        }
+                        if (text.charCodeAt(pos + 1) === CharacterCodes.question) {
+                            if (text.charCodeAt(pos + 2) === CharacterCodes.equals) {
+                                return pos += 3, token = SyntaxKind.QuestionQuestionEqualsToken;
+                            }
+                            return pos += 2, token = SyntaxKind.QuestionQuestionToken;
+                        }
                         pos++;
-                        if (text.charCodeAt(pos) === CharacterCodes.dot && !isDigit(text.charCodeAt(pos + 1))) {
-                            pos++;
-                            return token = SyntaxKind.QuestionDotToken;
-                        }
-                        if (text.charCodeAt(pos) === CharacterCodes.question) {
-                            pos++;
-                            return token = SyntaxKind.QuestionQuestionToken;
-                        }
                         return token = SyntaxKind.QuestionToken;
                     case CharacterCodes.openBracket:
                         pos++;
@@ -1965,6 +1984,9 @@ namespace ts {
                         }
 
                         if (text.charCodeAt(pos + 1) === CharacterCodes.bar) {
+                            if (text.charCodeAt(pos + 2) === CharacterCodes.equals) {
+                                return pos += 3, token = SyntaxKind.BarBarEqualsToken;
+                            }
                             return pos += 2, token = SyntaxKind.BarBarToken;
                         }
                         if (text.charCodeAt(pos + 1) === CharacterCodes.equals) {
@@ -2022,14 +2044,9 @@ namespace ts {
                         }
                         return token = SyntaxKind.PrivateIdentifier;
                     default:
-                        if (isIdentifierStart(ch, languageVersion)) {
-                            pos += charSize(ch);
-                            while (pos < end && isIdentifierPart(ch = codePointAt(text, pos), languageVersion)) pos += charSize(ch);
-                            tokenValue = text.substring(tokenPos, pos);
-                            if (ch === CharacterCodes.backslash) {
-                                tokenValue += scanIdentifierParts();
-                            }
-                            return token = getIdentifierToken();
+                        const identifierKind = scanIdentifier(ch, languageVersion);
+                        if (identifierKind) {
+                            return token = identifierKind;
                         }
                         else if (isWhiteSpaceSingleLine(ch)) {
                             pos += charSize(ch);
@@ -2044,6 +2061,32 @@ namespace ts {
                         pos += charSize(ch);
                         return token = SyntaxKind.Unknown;
                 }
+            }
+        }
+
+        function reScanInvalidIdentifier(): SyntaxKind {
+            Debug.assert(token === SyntaxKind.Unknown, "'reScanInvalidIdentifier' should only be called when the current token is 'SyntaxKind.Unknown'.");
+            pos = tokenPos = startPos;
+            tokenFlags = 0;
+            const ch = codePointAt(text, pos);
+            const identifierKind = scanIdentifier(ch, ScriptTarget.ESNext);
+            if (identifierKind) {
+                return token = identifierKind;
+            }
+            pos += charSize(ch);
+            return token; // Still `SyntaKind.Unknown`
+        }
+
+        function scanIdentifier(startCharacter: number, languageVersion: ScriptTarget) {
+            let ch = startCharacter;
+            if (isIdentifierStart(ch, languageVersion)) {
+                pos += charSize(ch);
+                while (pos < end && isIdentifierPart(ch = codePointAt(text, pos), languageVersion)) pos += charSize(ch);
+                tokenValue = text.substring(tokenPos, pos);
+                if (ch === CharacterCodes.backslash) {
+                    tokenValue += scanIdentifierParts();
+                }
+                return getIdentifierToken();
             }
         }
 
@@ -2068,6 +2111,12 @@ namespace ts {
                 }
             }
             return token;
+        }
+
+        function reScanAsteriskEqualsToken(): SyntaxKind {
+            Debug.assert(token === SyntaxKind.AsteriskEqualsToken, "'reScanAsteriskEqualsToken' should only be called on a '*='");
+            pos = tokenPos + 1;
+            return token = SyntaxKind.EqualsToken;
         }
 
         function reScanSlashToken(): SyntaxKind {
@@ -2175,9 +2224,9 @@ namespace ts {
             return token = scanTemplateAndSetTokenValue(/* isTaggedTemplate */ true);
         }
 
-        function reScanJsxToken(): JsxTokenSyntaxKind {
+        function reScanJsxToken(allowMultilineJsxText = true): JsxTokenSyntaxKind {
             pos = tokenPos = startPos;
-            return token = scanJsxToken();
+            return token = scanJsxToken(allowMultilineJsxText);
         }
 
         function reScanLessThanToken(): SyntaxKind {
@@ -2194,7 +2243,7 @@ namespace ts {
             return token = SyntaxKind.QuestionToken;
         }
 
-        function scanJsxToken(): JsxTokenSyntaxKind {
+        function scanJsxToken(allowMultilineJsxText = true): JsxTokenSyntaxKind {
             startPos = tokenPos = pos;
 
             if (pos >= end) {
@@ -2218,19 +2267,11 @@ namespace ts {
 
             // First non-whitespace character on this line.
             let firstNonWhitespace = 0;
-            let lastNonWhitespace = -1;
 
             // These initial values are special because the first line is:
             // firstNonWhitespace = 0 to indicate that we want leading whitespace,
 
             while (pos < end) {
-
-                // We want to keep track of the last non-whitespace (but including
-                // newlines character for hitting the end of the JSX Text region)
-                if (!isWhiteSpaceSingleLine(char)) {
-                    lastNonWhitespace = pos;
-                }
-
                 char = text.charCodeAt(pos);
                 if (char === CharacterCodes.openBrace) {
                     break;
@@ -2249,8 +2290,6 @@ namespace ts {
                     error(Diagnostics.Unexpected_token_Did_you_mean_or_rbrace, pos, 1);
                 }
 
-                if (lastNonWhitespace > 0) lastNonWhitespace++;
-
                 // FirstNonWhitespace is 0, then we only see whitespaces so far. If we see a linebreak, we want to ignore that whitespaces.
                 // i.e (- : whitespace)
                 //      <div>----
@@ -2260,6 +2299,11 @@ namespace ts {
                 if (isLineBreak(char) && firstNonWhitespace === 0) {
                     firstNonWhitespace = -1;
                 }
+                else if (!allowMultilineJsxText && isLineBreak(char) && firstNonWhitespace > 0) {
+                    // Stop JsxText on each line during formatting. This allows the formatter to
+                    // indent each line correctly.
+                    break;
+                }
                 else if (!isWhiteSpaceLike(char)) {
                     firstNonWhitespace = pos;
                 }
@@ -2267,8 +2311,7 @@ namespace ts {
                 pos++;
             }
 
-            const endPosition = lastNonWhitespace === -1 ? pos : lastNonWhitespace;
-            tokenValue = text.substring(startPos, endPosition);
+            tokenValue = text.substring(startPos, pos);
 
             return firstNonWhitespace === -1 ? SyntaxKind.JsxTextAllWhiteSpaces : SyntaxKind.JsxText;
         }
@@ -2277,9 +2320,11 @@ namespace ts {
         // they allow dashes
         function scanJsxIdentifier(): SyntaxKind {
             if (tokenIsIdentifierOrKeyword(token)) {
-                // An identifier or keyword has already been parsed - check for a `-` and then append it and everything after it to the token
+                // An identifier or keyword has already been parsed - check for a `-` or a single instance of `:` and then append it and
+                // everything after it to the token
                 // Do note that this means that `scanJsxIdentifier` effectively _mutates_ the visible token without advancing to a new token
                 // Any caller should be expecting this behavior and should only read the pos or token value after calling it.
+                let namespaceSeparator = false;
                 while (pos < end) {
                     const ch = text.charCodeAt(pos);
                     if (ch === CharacterCodes.minus) {
@@ -2287,11 +2332,23 @@ namespace ts {
                         pos++;
                         continue;
                     }
+                    else if (ch === CharacterCodes.colon && !namespaceSeparator) {
+                        tokenValue += ":";
+                        pos++;
+                        namespaceSeparator = true;
+                        token = SyntaxKind.Identifier; // swap from keyword kind to identifier kind
+                        continue;
+                    }
                     const oldPos = pos;
                     tokenValue += scanIdentifierParts(); // reuse `scanIdentifierParts` so unicode escapes are handled
                     if (pos === oldPos) {
                         break;
                     }
+                }
+                // Do not include a trailing namespace separator in the token, since this is against the spec.
+                if (tokenValue.slice(-1) === ":") {
+                    tokenValue = tokenValue.slice(0, -1);
+                    pos--;
                 }
             }
             return token;
@@ -2336,8 +2393,12 @@ namespace ts {
                     return token = SyntaxKind.WhitespaceTrivia;
                 case CharacterCodes.at:
                     return token = SyntaxKind.AtToken;
-                case CharacterCodes.lineFeed:
                 case CharacterCodes.carriageReturn:
+                    if (text.charCodeAt(pos) === CharacterCodes.lineFeed) {
+                        pos++;
+                    }
+                    // falls through
+                case CharacterCodes.lineFeed:
                     tokenFlags |= TokenFlags.PrecedingLineBreak;
                     return token = SyntaxKind.NewLineTrivia;
                 case CharacterCodes.asterisk:
